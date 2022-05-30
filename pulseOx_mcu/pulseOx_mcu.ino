@@ -14,10 +14,16 @@
 #include <TimerThree.h>
 #include <SPI.h>
 #include <math.h>
+#include <ADC.h>
 
 #define baudRate 9600
 
-#define redThreshold 3.0
+// #define redThreshold 3850
+#define redMaxThreshold 3725
+#define redMinThreshold 3350
+
+
+#define voltageFactor 0.0008058608059 // = 3.3/(2^12-1) for scaling binary voltage to decimal
 
 
 /********** LED driver constants **********/
@@ -35,40 +41,45 @@ int state3Length;
 
 /********** ADC constants **********/
 #define fSample 1000000
+// #define fSample
 
-#define BUFFLENGTH 300
+#define BUFFLENGTH 10000
 
 byte data[2];
 int redData[BUFFLENGTH];
 int irData[BUFFLENGTH];
-int muRed[BUFFLENGTH];
-int muIR[BUFFLENGTH];
-int cRed[BUFFLENGTH];
-int cIR[BUFFLENGTH];
+int redMaxAverage = 0;
+// int muRed[BUFFLENGTH];
+// int muIR[BUFFLENGTH];
+// int cRed[BUFFLENGTH];
+// int cIR[BUFFLENGTH];
 int O2Sat;
 int hr;
+
 
 // uint8_t transmitBuf[BUFFLENGTH+2];
 // uint8_t lightFlag[1];
 int numLoops=0;
 int n = 0;
+int averagingCount = 0;
+int nAveragingSamples = 30;
 
 // SPI pins
 const int CSPin   = 10;
 const int MOSIPin = 11;
 const int MISOPin0 = 12; // connect PMODAD1.D0 to Teensy.pin12
 const int MISOPin1 = 39; // connect PMODAD1.D1 to Teensy.pin39
+const int adc2 = 32; // teensy adc pin for envelope detector
 const int SCKPin  = 14;
-
-// int ADCdata0;
-// int ADCdata1;
 
 // SPI Settings: speed, mode and endianness
 SPISettings settings(fSample, MSBFIRST, SPI_MODE2);  // 1MHz, MSB,
 
-
 void setup(void)
 {
+  //
+  // analogReadResolution(12);
+  // analogStartContinuous(adc2);
 
   // set up leds
   pinMode(IR, OUTPUT);  // designate pin 13 an output pin
@@ -86,16 +97,16 @@ void setup(void)
   SPI.setMISO(MISOPin0);
   SPI.setMOSI(MOSIPin);
   SPI.setSCK(SCKPin);
+
+  // adjust state0Length and state2Length according to desired duty cycle
+  state0Length=16;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
+  state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+  state2Length=16;               // state2 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state2Length <= 16)
+  state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
 }
 
 void loop(void)
 {
-  // adjust state0Length and state2Length according to desired duty cycle
-  state0Length=14;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
-  state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
-  state2Length=14;               // state2 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state2Length <= 16)
-  state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-
   noInterrupts();
   countCopy = count;
   interrupts();
@@ -155,19 +166,90 @@ void loop(void)
 
   if (n>= BUFFLENGTH) {
 
-    // get red max
-    redMax = getMax(redData);
+    // read the envelope detector adc
+    // int envelopeDetect = analogReadContinuous();
 
-    // get ir max
-    irData = getMax(irData);
+    // read peak detector on IR ADC for now
+    // TODO: fix this
+    getADC(data,MISOPin1);
+    int envelopeDetect = ((data[0] << 8) + data[1]);
 
-    // if red received signal is greater than threshold
-    if(redMax > redThreshold) {
-      // update our pwm
+    Serial.print("Peak detect: ");
+    Serial.println(envelopeDetect*voltageFactor);
+
+    if ((envelopeDetect > redMaxThreshold) && (state0Length > 2)) {
 
       // DEBUG
-      Serial.println("exceeded red threshold");
+      Serial.print("exceeded red threshold: ");
+      Serial.println((float) envelopeDetect*voltageFactor);
+
+
+      // update our pwm
+      // adjust state0Length and state2Length according to desired duty cycle
+      state0Length=state0Length-1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
+      state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+      state2Length=state0Length;     // match state 0 length
+      state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
+    } else if ((envelopeDetect < redMinThreshold) && (state0Length <= 14)) {
+      Serial.println("going up :)");
+
+      // update our pwm
+      // adjust state0Length and state2Length according to desired duty cycle
+      state0Length=state0Length+1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
+      state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+      state2Length=state0Length;     // match state 0 length
+      state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
     }
+
+
+    // // get red max
+    // int redMax = getMax(redData);
+    //
+    // // // get ir max
+    // // int irMax = getMax(irData);
+    //
+    // // add it to the averaging value
+    // redMaxAverage += redMax;
+    //
+    // // increment averaging count
+    // averagingCount++;
+    //
+    // // Serial.print("curr max value: ");
+    // // Serial.println(redMax);
+    //
+    //
+    // // if we've reached our averaging count
+    // if (averagingCount >= nAveragingSamples) {
+    //
+    //   redMaxAverage = redMaxAverage/averagingCount;
+    //
+    //   Serial.print("average max value: ");
+    //   Serial.println((float) redMaxAverage*voltageFactor);
+    //
+    //   // if red received signal is greater than threshold
+    //   if (redMaxAverage > redThreshold) {
+    //
+    //     // DEBUG
+    //     Serial.print("exceeded red threshold: ");
+    //     Serial.println((float) redMaxAverage*voltageFactor);
+    //
+    //
+    //     // update our pwm
+    //     // // adjust state0Length and state2Length according to desired duty cycle
+    //     // state0Length=14;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
+    //     // state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+    //     // state2Length=state0Length;     // match state 0 length
+    //     // state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
+    //
+    //   }
+    //
+    //   // reset averaging count
+    //   averagingCount = 0;
+    //
+    //   // reset average value
+    //   redMaxAverage = 0;
+    // }
+
 
     // int redAverage = getAverage(redData);
     // int irAverage = getAverage(irData);
@@ -194,10 +276,10 @@ void loop(void)
   // read red adc
   getADC(data,MISOPin0);
   redData[n] = ((data[0] << 8) + data[1]);
-
-  // read ir adc
-  getADC(data,MISOPin1);
-  irData[n] = ((data[0] << 8) + data[1]);
+  //
+  // // read ir adc
+  // getADC(data,MISOPin1);
+  // irData[n] = ((data[0] << 8) + data[1]);
 
   n++;
 }
@@ -211,10 +293,10 @@ float getMax(int *data) {
   // for every value in the array
   for (int i = 0; i < sizeof(data); i++) {
     // if this value is more than previous max
-    if (myArray[i] > maxVal) {
+    if (data[i] > maxVal) {
 
       // update max value
-      maxVal = myArray[i];
+      maxVal = data[i];
     }
   }
 
@@ -223,8 +305,9 @@ float getMax(int *data) {
 }
 
 float getAverage(int *data) {
-  int sum;
-  for (int i=0;i<sizeof(data);i++){
+  int sum=0;
+  int i;
+  for (i=0;i<sizeof(data);i++){
     sum += data[i];
   }
 
@@ -237,7 +320,6 @@ void ISR(void)
 {
   count = count + 1;
 }
-
 
 void getADC(byte* data, int whichMISO) {
 
