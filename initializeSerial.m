@@ -6,7 +6,8 @@ bufsize=700;
 Fs = 1e6;
 
 % Create Serial port 's'. Specify port name
-s = serial('/dev/cu.usbmodem27613001');
+s = serial('COM3');
+%s = serial('/dev/cu.usbmodem27613001');
 set(s, 'Baudrate',9600, 'StopBits', 1);
 set(s, 'Terminator', 'LF', 'Parity', 'none');
 set(s, 'FlowControl','none');
