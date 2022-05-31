@@ -57,12 +57,14 @@ int O2Sat;
 int hr;
 
 
+//
 // uint8_t transmitBuf[BUFFLENGTH+2];
 // uint8_t lightFlag[1];
-int numLoops=0;
+
 int n = 0;
-int averagingCount = 0;
-int nAveragingSamples = 30;
+int n1 = 0;
+int envelopeDetectAvg = 0;
+#define average_countThreshold 300
 
 // SPI pins
 const int CSPin   = 10;
@@ -87,6 +89,7 @@ void setup(void)
   Timer3.initialize(25);
   Timer3.attachInterrupt(ISR); // call ISR every 25 us
 
+  pinMode(25,OUTPUT);
 
   // set up adc
   pinMode(CSPin, OUTPUT);
@@ -107,6 +110,87 @@ void setup(void)
 
 void loop(void)
 {
+
+  if (n>= BUFFLENGTH) {
+
+    digitalWrite(25,HIGH);
+    //
+    // // read the envelope detector adc
+    // // int envelopeDetect = analogReadContinuous();
+    //
+    // // read peak detector on IR ADC for now
+    // // TODO: fix this
+    getADC(data,MISOPin1);
+    // int envelopeDetect = ((data[0] << 8) + data[1]);
+    //
+    //
+    // // add to the running sum for avg
+    // envelopeDetectAvg += envelopeDetect;
+    // // increment n1
+    // n1++;
+    //
+    // // if we've taken enough samples
+    // if (n1>average_countThreshold) {
+    //
+    //   // get the average
+    //   envelopeDetectAvg = envelopeDetectAvg/n1;
+    //
+    //   Serial.print("Peak detect avg: ");
+    //   Serial.println(envelopeDetectAvg*voltageFactor);
+    //   Serial.print("pwm length: ");
+    //   Serial.println(state0Length);
+    //
+    //   // check against our thresholds
+    //   if ((envelopeDetectAvg > redMaxThreshold) && (state0Length > 2)) {
+    //
+    //     // DEBUG
+    //     Serial.print("exceeded red threshold: ");
+    //     Serial.println((float) envelopeDetect*voltageFactor);
+    //
+    //
+    //     // update our pwm
+    //     // adjust state0Length and state2Length according to desired duty cycle
+    //     state0Length=state0Length-1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
+    //     state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+    //     state2Length=state0Length;     // match state 0 length
+    //     state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
+    //   } else if ((envelopeDetectAvg < redMinThreshold) && (state0Length <= 15)) {
+    //     Serial.println("going up :)");
+    //
+    //     // update our pwm
+    //     // adjust state0Length and state2Length according to desired duty cycle
+    //     state0Length=state0Length+1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
+    //     state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+    //     state2Length=state0Length;     // match state 0 length
+    //     state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
+    //   }
+    //
+    //   // reset count and avg
+    //   n1 = 0;
+    //   envelopeDetectAvg = 0;
+    // }
+    //
+    // // reset everything
+    // memset(redData, 0, sizeof(redData));
+    // memset(irData, 0, sizeof(irData));
+    // n = 0;
+
+    digitalWrite(25,LOW);
+  }
+
+
+  // read red adc
+
+
+
+  // redData[n] = ((data[0] << 8) + data[1]);
+  //
+  // // read ir adc
+  // getADC(data,MISOPin1);
+  // irData[n] = ((data[0] << 8) + data[1]);
+
+  n++;
+
   noInterrupts();
   countCopy = count;
   interrupts();
@@ -133,6 +217,10 @@ void loop(void)
       interrupts();
     }
     else{
+      // if ((n%10000) == 0) {
+      //   getADC(data,MISOPin0);
+      // }
+
       // red OFF
       digitalWrite(RED, LOW);
     }
@@ -158,137 +246,19 @@ void loop(void)
       interrupts();
     }
     else{
+      // getADC(data,MISOPin1);
       // IR OFF
       digitalWrite(IR, LOW);
     }
     break;
   }
-
-  if (n>= BUFFLENGTH) {
-
-    // read the envelope detector adc
-    // int envelopeDetect = analogReadContinuous();
-
-    // read peak detector on IR ADC for now
-    // TODO: fix this
-    getADC(data,MISOPin1);
-    int envelopeDetect = ((data[0] << 8) + data[1]);
-
-    Serial.print("Peak detect: ");
-    Serial.println(envelopeDetect*voltageFactor);
-
-    if ((envelopeDetect > redMaxThreshold) && (state0Length > 2)) {
-
-      // DEBUG
-      Serial.print("exceeded red threshold: ");
-      Serial.println((float) envelopeDetect*voltageFactor);
-
-
-      // update our pwm
-      // adjust state0Length and state2Length according to desired duty cycle
-      state0Length=state0Length-1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
-      state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
-      state2Length=state0Length;     // match state 0 length
-      state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-    } else if ((envelopeDetect < redMinThreshold) && (state0Length <= 14)) {
-      Serial.println("going up :)");
-
-      // update our pwm
-      // adjust state0Length and state2Length according to desired duty cycle
-      state0Length=state0Length+1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
-      state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
-      state2Length=state0Length;     // match state 0 length
-      state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-    }
-
-
-    // // get red max
-    // int redMax = getMax(redData);
-    //
-    // // // get ir max
-    // // int irMax = getMax(irData);
-    //
-    // // add it to the averaging value
-    // redMaxAverage += redMax;
-    //
-    // // increment averaging count
-    // averagingCount++;
-    //
-    // // Serial.print("curr max value: ");
-    // // Serial.println(redMax);
-    //
-    //
-    // // if we've reached our averaging count
-    // if (averagingCount >= nAveragingSamples) {
-    //
-    //   redMaxAverage = redMaxAverage/averagingCount;
-    //
-    //   Serial.print("average max value: ");
-    //   Serial.println((float) redMaxAverage*voltageFactor);
-    //
-    //   // if red received signal is greater than threshold
-    //   if (redMaxAverage > redThreshold) {
-    //
-    //     // DEBUG
-    //     Serial.print("exceeded red threshold: ");
-    //     Serial.println((float) redMaxAverage*voltageFactor);
-    //
-    //
-    //     // update our pwm
-    //     // // adjust state0Length and state2Length according to desired duty cycle
-    //     // state0Length=14;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
-    //     // state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
-    //     // state2Length=state0Length;     // match state 0 length
-    //     // state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-    //
-    //   }
-    //
-    //   // reset averaging count
-    //   averagingCount = 0;
-    //
-    //   // reset average value
-    //   redMaxAverage = 0;
-    // }
-
-
-    // int redAverage = getAverage(redData);
-    // int irAverage = getAverage(irData);
-
-    /**** do our signal processing ****/
-    // // calculate mu for red
-    // for (int i=0; n<(BUFFLENGTH); n++) {
-    //
-    //   // muRed[i] = ln(redData)/ln();
-    // }
-    //
-    // // calculate mu for IR
-
-    // transmit the data out
-    // Serial.write(redData);
-    // Serial.flush();
-
-    // reset everything
-    memset(redData, 0, sizeof(redData));
-    memset(irData, 0, sizeof(irData));
-    n = 0;
-  }
-
-  // read red adc
-  getADC(data,MISOPin0);
-  redData[n] = ((data[0] << 8) + data[1]);
-  //
-  // // read ir adc
-  // getADC(data,MISOPin1);
-  // irData[n] = ((data[0] << 8) + data[1]);
-
-  n++;
 }
 
 /********************** getMax() *********************/
-float getMax(int *data) {
+int getMax(int *data) {
 
   // set max val as first val in array
-  float maxVal = data[0];
+  int maxVal = data[0];
 
   // for every value in the array
   for (int i = 0; i < sizeof(data); i++) {
@@ -301,19 +271,20 @@ float getMax(int *data) {
   }
 
   // return max value
-  return (float) maxVal;
+  return maxVal;
 }
 
-float getAverage(int *data) {
-  int sum=0;
-  int i;
-  for (i=0;i<sizeof(data);i++){
-    sum += data[i];
-  }
-
-  int average = (float) sum/(float) i;
-  return average;
-}
+// float getAverage(int *data) {
+//   int sum=0;
+//   int i;
+//   for (i=0;i<sizeof(data);i++){
+//     sum += data[i];
+//   }
+//
+//   int average = (float) sum/(float) i;
+//   return average;
+// }
+//
 
 // keep count, in 25 us divisions
 void ISR(void)
