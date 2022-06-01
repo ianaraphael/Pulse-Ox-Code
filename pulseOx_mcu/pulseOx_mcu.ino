@@ -50,6 +50,7 @@ int state3Length;
 #define fSample 1000000 // adc sample rate. maximum 1MHz
 
 #define BUFFLENGTH 100 // buffer length for data buffers
+// #define BUFFLENGTH 10000 // buffer length for data buffers
 
 byte data[2]; // holder array for instantaneous ADC reads
 int redData[BUFFLENGTH]; // buffer for reddata
@@ -116,7 +117,6 @@ void setup(void)
 }
 
 void loop(void) {
-
   // if we've taken enough data samples
   if (n>= BUFFLENGTH) {
 
@@ -218,8 +218,8 @@ void loop(void) {
   }
 
   // sample
-  digitalWrite(25,HIGH);
   // read red adc
+  digitalWrite(25,HIGH);
   getADC(data,MISOPin0);
   redData[n] = ((data[0] << 8) + data[1]);
   getADC(data,MISOPin1);
