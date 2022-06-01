@@ -15,7 +15,7 @@
 * 2022.05.18
 */
 
-#include "arduinoFFT.h"
+// #include "arduinoFFT.h"
 #include <TimerThree.h>
 #include <SPI.h>
 #include <math.h>
@@ -30,11 +30,13 @@
 #define redMaxThreshold 3720
 #define redMinThreshold 3350
 
+#define lowThresh 2482
+#define midThresh 2730
+#define highThresh 2854
 
 #define voltageFactor 0.0008058608059 // = 3.3/(2^12-1) for scaling binary voltage to decimal
 
-// #define SAMPLING_FREQ 26880 //Hz, found from oscilloscope for sampling freq of ADC with all code
-// #define SAMPLES 1024
+#define SAMPLING_FREQ_EFF 26880 //Hz, found from oscilloscope for sampling freq of ADC with all code
 
 // arduinoFFT FFT = arduinoFFT();
 // double vReal[BUFFLENGTH];
@@ -54,9 +56,9 @@ int state2Length;
 int state3Length;
 
 /********** ADC constants **********/
-#define fSample 1000000 // adc sample rate. maximum 1MHz
+#define fSample 1000 // adc sample rate. maximum 1MHz
 
-#define BUFFLENGTH 100 // buffer length for data buffers
+#define BUFFLENGTH 1000 // buffer length for data buffers
 // #define BUFFLENGTH 10000 // buffer length for data buffers
 
 byte data[2]; // holder array for instantaneous ADC reads
@@ -78,7 +80,7 @@ int hr;
 int n = 0;
 int n1 = 0;
 int envelopeDetectAvg = 0;
-#define average_countThreshold 300
+#define average_countThreshold 30
 
 // SPI pins
 const int CSPin   = 10;
@@ -139,22 +141,25 @@ void loop(void) {
     // increment n1
     n1++;
 
-    // calculate heartrate
-    // double heartbeat = HeartRate(irData);
-    // Serial.println("made it into averaging loop" );
-    digitalWrite(25,HIGH);
-    // HeartRate(irData);
-    digitalWrite(25,LOW);
-
 
     // if we've taken enough peak detector samples
     if (n1>average_countThreshold) {
 
+      // delay(25000);
+
+      // calculate heartrate
+      Serial.print("heartrate: ");
+      Serial.println(getHeartRate(irData, lowThresh, midThresh, highThresh));
+
+      digitalWrite(25,HIGH);
+      // HeartRate(irData);
+      digitalWrite(25,LOW);
+
       // get the average peak detector value
       envelopeDetectAvg = envelopeDetectAvg/n1;
 
-      Serial.print("Peak detect avg: ");
-      Serial.println(envelopeDetectAvg*voltageFactor);
+      // Serial.print("Peak detect avg: ");
+      // Serial.println(envelopeDetectAvg*voltageFactor);
       updatePwm(envelopeDetectAvg);
 
       // reset count and avg count
@@ -246,17 +251,73 @@ void loop(void) {
 }
 
 /********************** getHeartRate() *********************/
-int getHeartRate() {
+int getHeartRate(int* data, int lowThreshold, int midThreshold, int highThreshold) {
 
+  int index1 = -1;
+  int index2 = -1;
+  int index3 = -1;
+  int findNextPulse = 0;
+  int heartRate = -1;
+
+  // for every value in the array
+  for (int i=0;i <sizeof(data);i++) {
+
+    // if the value is higher than the mid threshold and we haven't found a pulse yet
+    if ((data[i] >= midThreshold) && (index1 == -1)) {
+      // save it as index1
+      index1 = i;
+      continue;
+    }
+
+    // if the value is higher than the high threshold and we've already found index1
+    if ((data[i] >= highThreshold) && (index1 != -1) && (!findNextPulse)) {
+      // we've found a true pulse. start looking for the decrease.
+      findNextPulse = 1;
+      continue;
+    }
+
+    // if the data is below the low threshold & we're finding the next pulse
+    // if ((data[i] <= lowThreshold) && (findNextPulse==1) && (index2 == -1)) {
+    if ((data[i] <= lowThreshold)) {
+      Serial.println("made i3");
+      // save this index as the low swing
+      index2 = i;
+      continue;
+    }
+    else if ((data[i]>midThreshold) && (index2 != -1)) {
+      index3 = i;
+      Serial.print("made it4");
+    }
+    else if ((data[i]>highThreshold) && (index3 != -1)) {
+
+      Serial.print("index1: ");
+      Serial.println(index1);
+
+      Serial.print("index2: ");
+      Serial.println(index1);
+
+      Serial.print("index3: ");
+      Serial.println(index1);
+
+      // calculate heart rate from index 1 and 3
+      heartRate = 1/((index3 - index1)/SAMPLING_FREQ_EFF);
+
+      break;
+
+      // find maximum and minimum values
+    }
+  }
+
+  return heartRate;
 }
 
 /********************** findMinMax() *********************/
-int findMinMax(int* data, int heartRate) {
-  // look through data vector for a maximum heartrate
-
-  // look within (heartrate/sampling rate) indices to find minimum
-
-}
+// int findMinMax(int* data, int heartRate) {
+//   // look through data vector for a maximum heartrate
+//
+//   // look within (heartrate/sampling rate) indices to find minimum
+//
+// }
 
 
 /********************** max() *********************/
