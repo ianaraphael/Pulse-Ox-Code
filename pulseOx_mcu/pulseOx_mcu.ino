@@ -62,6 +62,8 @@ int state3Length;
 byte data[2]; // holder array for instantaneous ADC reads
 int redData[BUFFLENGTH]; // buffer for reddata
 int irData[BUFFLENGTH]; // buffer for ir data
+int redpeak[BUFFLENGTH]; // peak locations for red 
+int irpeak[BUFFLENGTH]; // peak indexes for ir 
 int redMaxAverage = 0; //
 // int muRed[BUFFLENGTH];
 // int muIR[BUFFLENGTH];
@@ -242,6 +244,7 @@ void loop(void) {
   redData[n] = ((data[0] << 8) + data[1]);
   getADC(data,MISOPin1);
   irData[n] = ((data[0] << 8) + data[1]);
+  irpeak[n] = matchPeakDetect(envelopeDetect[n],irData[n]); // check if ir data is at a peak by seeing if it matches peak detector value
   n++;
 }
 
@@ -250,6 +253,14 @@ int getHeartRate() {
 
 }
 
+/********************** matchPeakDetect() *********************/
+int matchPeakDetect(int peak, int data) {
+  int maxpk = 0;
+  // want to check if data = peak from peak detector 
+  if (data == peak) 
+     maxpk = 1;
+  return maxpk;
+}
 /********************** findMinMax() *********************/
 int findMinMax(int* data, int heartRate) {
   // look through data vector for a maximum heartrate
