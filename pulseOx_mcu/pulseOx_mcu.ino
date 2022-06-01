@@ -253,9 +253,27 @@ int getHeartRate() {
 /********************** findMinMax() *********************/
 int findMinMax(int* data, int heartRate) {
   // look through data vector for a maximum heartrate
-
+  int heartfreq = heartRate/60;
+  int numSamps = 1/heartfreq;
   // look within (heartrate/sampling rate) indices to find minimum
+  int* const srcData = data.slice(1,numSamps);  // cut data down to each heart beat cycle or search around max peak found in heartrate extraction
+  int localMin = min(srcData);  // find min of this data section to find min of the first heart beat 
+  int localMax = max(srcData);
 
+  Serial.print("Local Min: ")
+  Serial.println(localMin)
+  return localMin
+ }
+
+int BloodSat(int RedMin, int RedMax, int IRMin, int IRMax) {
+
+  // take in min and max from each LED color and determine absorption ratio
+  R = (RedMax/RedMin)/(IRMax/IRMin);
+  k = 10; // calibration term that needs to be tuned empiracally 
+  O2sat = 110-k*R; 
+  Serial.print("Oxygen saturation: ");
+  Serial.println(O2sat);
+  return O2sat
 }
 
 
