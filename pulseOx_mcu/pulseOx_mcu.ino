@@ -15,6 +15,7 @@
 * 2022.05.18
 */
 
+#include "arduinoFFT.h"
 #include <TimerThree.h>
 #include <SPI.h>
 #include <math.h>
@@ -32,6 +33,15 @@
 
 #define voltageFactor 0.0008058608059 // = 3.3/(2^12-1) for scaling binary voltage to decimal
 
+#define SAMPLING_FREQ 26880 //Hz, found from oscilloscope for sampling freq of ADC with all code
+#define SAMPLES 1024
+
+arduinoFFT FFT = arduinoFFT();
+unsigned int sampling_period_us;
+unsigned long microseconds;
+ 
+double vReal[SAMPLES];
+double vImag[SAMPLES];
 
 /********** LED driver constants **********/
 const int IR = 24;
@@ -129,6 +139,8 @@ void loop(void) {
     // increment n1
     n1++;
 
+    int heartbeat = HeartRate(irData);
+    
     // if we've taken enough peak detector samples
     if (n1>average_countThreshold) {
 
@@ -138,7 +150,7 @@ void loop(void) {
       Serial.print("Peak detect avg: ");
       Serial.println(envelopeDetectAvg*voltageFactor);
       updatePwm(envelopeDetectAvg);
-
+      
       // reset count and avg count
       n1 = 0;
       envelopeDetectAvg = 0;
@@ -298,6 +310,22 @@ int updatePwm(int peakVoltage) {
   return state0Length;
 }
 
+int HeartRate(int data) {
+  
+  sampling_period_us = round(1000000*(1.0/SAMPLING_FREQ));
+  double vImag[data];
+  memset(vImag,0,sizeof(vImag));
+  
+  /*FFT*/
+    FFT.Windowing(data, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+    FFT.Compute(data, vImag, SAMPLES, FFT_FORWARD);
+    FFT.ComplexToMagnitude(data, vImag, SAMPLES);
+    double peak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQ);
+    
+    /*PRINT RESULTS*/
+    //Serial.println(peak);     //Print out what frequency is the most dominant.
+    return peak; 
+}
 // keep count, in 25 us divisions
 void ISR(void)
 {
