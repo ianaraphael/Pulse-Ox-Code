@@ -34,14 +34,11 @@
 #define voltageFactor 0.0008058608059 // = 3.3/(2^12-1) for scaling binary voltage to decimal
 
 #define SAMPLING_FREQ 26880 //Hz, found from oscilloscope for sampling freq of ADC with all code
-#define SAMPLES 1024
+// #define SAMPLES 1024
 
 arduinoFFT FFT = arduinoFFT();
-unsigned int sampling_period_us;
-unsigned long microseconds;
- 
-double vReal[SAMPLES];
-double vImag[SAMPLES];
+// double vReal[BUFFLENGTH];
+// double vImag[BUFFLENGTH];
 
 /********** LED driver constants **********/
 const int IR = 24;
@@ -59,7 +56,7 @@ int state3Length;
 /********** ADC constants **********/
 #define fSample 1000000 // adc sample rate. maximum 1MHz
 
-#define BUFFLENGTH 100 // buffer length for data buffers
+#define BUFFLENGTH 1024 // buffer length for data buffers
 // #define BUFFLENGTH 10000 // buffer length for data buffers
 
 byte data[2]; // holder array for instantaneous ADC reads
@@ -81,7 +78,7 @@ int hr;
 int n = 0;
 int n1 = 0;
 int envelopeDetectAvg = 0;
-#define average_countThreshold 300
+#define average_countThreshold 30
 
 // SPI pins
 const int CSPin   = 10;
@@ -127,6 +124,9 @@ void setup(void)
 }
 
 void loop(void) {
+
+  // Serial.println("made it into main loop" );
+
   // if we've taken enough data samples
   if (n>= BUFFLENGTH) {
 
@@ -139,8 +139,12 @@ void loop(void) {
     // increment n1
     n1++;
 
-    int heartbeat = HeartRate(irData);
-    
+    // calculate heartrate
+    // double heartbeat = HeartRate(irData);
+    // Serial.println("made it into averaging loop" );
+    HeartRate(irData);
+
+
     // if we've taken enough peak detector samples
     if (n1>average_countThreshold) {
 
@@ -150,7 +154,7 @@ void loop(void) {
       Serial.print("Peak detect avg: ");
       Serial.println(envelopeDetectAvg*voltageFactor);
       updatePwm(envelopeDetectAvg);
-      
+
       // reset count and avg count
       n1 = 0;
       envelopeDetectAvg = 0;
@@ -310,22 +314,24 @@ int updatePwm(int peakVoltage) {
   return state0Length;
 }
 
-int HeartRate(int data) {
-  
-  sampling_period_us = round(1000000*(1.0/SAMPLING_FREQ));
-  double vImag[data];
-  memset(vImag,0,sizeof(vImag));
-  
+double HeartRate(int* data) {
+
+  // sampling_period_us = round((1.0/SAMPLING_FREQ));
+  double vImag[sizeof(data)];
+  memset(vImag,0,sizeof(data));
+
+
   /*FFT*/
-    FFT.Windowing(data, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-    FFT.Compute(data, vImag, SAMPLES, FFT_FORWARD);
-    FFT.ComplexToMagnitude(data, vImag, SAMPLES);
-    double peak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQ);
-    
+    FFT.Windowing((double*)data, sizeof(data), FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+    FFT.Compute((double*) data, vImag, sizeof(data), FFT_FORWARD);
+    FFT.ComplexToMagnitude((double*) data, vImag, sizeof(data));
+    double peak = FFT.MajorPeak((double*) data, sizeof(data), SAMPLING_FREQ);
+
     /*PRINT RESULTS*/
-    //Serial.println(peak);     //Print out what frequency is the most dominant.
-    return peak; 
+    Serial.println(peak);     //Print out what frequency is the most dominant.
+    return peak;
 }
+
 // keep count, in 25 us divisions
 void ISR(void)
 {
