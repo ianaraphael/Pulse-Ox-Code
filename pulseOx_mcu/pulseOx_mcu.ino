@@ -8,6 +8,10 @@
 *
 * Ian Raphael
 * ian.a.raphael.th@dartmouth.edu
+*
+* Sophie Lloyd
+* sophie.lloyd.th@dartmouth.edu
+*
 * 2022.05.18
 */
 
@@ -15,6 +19,8 @@
 #include <SPI.h>
 #include <math.h>
 // #include <ADC.h>
+
+#define DEBUG 1
 
 #define baudRate 9600
 
@@ -41,15 +47,14 @@ int state2Length;
 int state3Length;
 
 /********** ADC constants **********/
-#define fSample 1000000
-// #define fSample
+#define fSample 1000000 // adc sample rate. maximum 1MHz
 
-#define BUFFLENGTH 10000
+#define BUFFLENGTH 100 // buffer length for data buffers
 
-byte data[2];
-int redData[BUFFLENGTH];
-int irData[BUFFLENGTH];
-int redMaxAverage = 0;
+byte data[2]; // holder array for instantaneous ADC reads
+int redData[BUFFLENGTH]; // buffer for reddata
+int irData[BUFFLENGTH]; // buffer for ir data
+int redMaxAverage = 0; //
 // int muRed[BUFFLENGTH];
 // int muIR[BUFFLENGTH];
 // int cRed[BUFFLENGTH];
@@ -85,6 +90,8 @@ void setup(void)
   analogReadResolution(12);
   pinMode(adc2,INPUT);
 
+  pinMode(25,OUTPUT);
+
   // set up leds
   pinMode(IR, OUTPUT);  // designate pin 13 an output pin
   pinMode(RED, OUTPUT); // designate pin 14 an output pin
@@ -108,8 +115,7 @@ void setup(void)
   state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
 }
 
-void loop(void)
-{
+void loop(void) {
 
   // if we've taken enough data samples
   if (n>= BUFFLENGTH) {
@@ -119,6 +125,7 @@ void loop(void)
 
     // add to the running sum for avg
     envelopeDetectAvg += envelopeDetect;
+
     // increment n1
     n1++;
 
@@ -130,33 +137,7 @@ void loop(void)
 
       Serial.print("Peak detect avg: ");
       Serial.println(envelopeDetectAvg*voltageFactor);
-      Serial.print("pwm length: ");
-      Serial.println(state0Length);
-
-      // if received voltage is too high
-      if ((envelopeDetectAvg > redMaxThreshold) && (state0Length > 2)) {
-
-        // DEBUG
-        Serial.print("exceeded red threshold: ");
-        Serial.println((float) envelopeDetect*voltageFactor);
-
-
-        // decrease pulse with
-        state0Length=state0Length-1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
-        state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
-        state2Length=state0Length;     // match state 0 length
-        state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-      }
-      // if received voltage is too low
-      else if ((envelopeDetectAvg < redMinThreshold) && (state0Length <= 15)) {
-        Serial.println("going up :)");
-
-        // increase the pulse width
-        state0Length=state0Length+1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
-        state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
-        state2Length=state0Length;     // match state 0 length
-        state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-      }
+      updatePwm(envelopeDetectAvg);
 
       // reset count and avg count
       n1 = 0;
@@ -169,15 +150,14 @@ void loop(void)
     n = 0;
   }
 
-
-  // read red adc
+  // // read red adc
+  // getADC(data,MISOPin0);
   // redData[n] = ((data[0] << 8) + data[1]);
   //
   // // read ir adc
   // getADC(data,MISOPin1);
   // irData[n] = ((data[0] << 8) + data[1]);
 
-  n++;
 
   noInterrupts();
   countCopy = count;
@@ -205,10 +185,6 @@ void loop(void)
       interrupts();
     }
     else{
-      // if ((n%10000) == 0) {
-      //   getADC(data,MISOPin0);
-      // }
-
       // red OFF
       digitalWrite(RED, LOW);
     }
@@ -240,6 +216,16 @@ void loop(void)
     }
     break;
   }
+
+  // sample
+  digitalWrite(25,HIGH);
+  // read red adc
+  getADC(data,MISOPin0);
+  redData[n] = ((data[0] << 8) + data[1]);
+  getADC(data,MISOPin1);
+  irData[n] = ((data[0] << 8) + data[1]);
+  digitalWrite(25,LOW);
+  n++;
 }
 
 /********************** getMax() *********************/
@@ -273,6 +259,44 @@ int getMax(int *data) {
 //   return average;
 // }
 //
+
+// update PWM
+int updatePwm(int peakVoltage) {
+
+  // if received voltage is too high
+  if ((peakVoltage > redMaxThreshold) && (state0Length > 2)) {
+
+    // decrease pulse with
+    state0Length=state0Length-1;   // decrement state0
+    state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+    state2Length=state0Length;     // match state 0 length
+    state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
+
+    if (DEBUG) {
+      Serial.print("Threshold exceeded: ");
+      Serial.println(peakVoltage*voltageFactor);
+      Serial.print("Decreasing pulse width to: ");
+      Serial.println(state0Length);
+    }
+  }
+  // if received voltage is too low
+  else if ((peakVoltage < redMinThreshold) && (state0Length <= 15)) {
+
+    // increase the pulse width
+    state0Length=state0Length+1;   // increment state0
+    state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+    state2Length=state0Length;     // match state 0 length
+    state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
+
+    if (DEBUG) {
+      Serial.print("Threshold exceeded: ");
+      Serial.println(peakVoltage*voltageFactor);
+      Serial.print("Increasing pulse width to: ");
+      Serial.println(state0Length);
+    }
+  }
+  return state0Length;
+}
 
 // keep count, in 25 us divisions
 void ISR(void)
