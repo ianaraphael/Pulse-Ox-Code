@@ -65,7 +65,7 @@ byte data[2]; // holder array for instantaneous ADC reads
 int redData[BUFFLENGTH]; // buffer for reddata
 int irData[BUFFLENGTH]; // buffer for ir data
 int redpeak[BUFFLENGTH]; // peak locations for red
-int irpeak[BUFFLENGTH]; // peak indexes for ir
+// int irpeak[BUFFLENGTH]; // peak indexes for ir
 int redMaxAverage = 0; //
 // int muRed[BUFFLENGTH];
 // int muIR[BUFFLENGTH];
@@ -83,6 +83,10 @@ int n = 0;
 int n1 = 0;
 int envelopeDetectAvg = 0;
 #define average_countThreshold 30
+int prevTime = 0;
+int avgHeartRate = 0;
+int minHeartRate = 20;
+int nHeartRates = 0;
 
 // SPI pins
 const int CSPin   = 10;
@@ -102,7 +106,8 @@ void setup(void)
   analogReadResolution(12);
   pinMode(adc2,INPUT);
 
-  pinMode(25,OUTPUT);
+  pinMode(25,INPUT);
+
 
   // set up leds
   pinMode(IR, OUTPUT);  // designate pin 13 an output pin
@@ -129,68 +134,112 @@ void setup(void)
 
 void loop(void) {
 
-  // Serial.println("made it into main loop" );
+  digitalWrite(25,HIGH);
 
   // if we've taken enough data samples
   if (n>= BUFFLENGTH) {
 
-    // read the envelope detector adc
-    int envelopeDetect = analogRead(adc2);
-
-    irpeak[n1] = matchPeakDetect(envelopeDetect,irData[n1]); // check if ir data is at a peak by seeing if it matches peak detector value
-    // how to get n1 of irpeak to line up with envelope read
-    Serial.print("IR peak: ");
-    Serial.println(irpeak[n1]);
-
-    // add to the running sum for avg
-    envelopeDetectAvg += envelopeDetect;
-
     // increment n1
     n1++;
-
 
     // if we've taken enough peak detector samples
     if (n1>average_countThreshold) {
 
-      // delay(25000);
+      // calculate average heartRate
+      avgHeartRate = avgHeartRate/nHeartRates;
 
-      // calculate heartrate
       Serial.print("heartrate: ");
-      Serial.println(getHeartRate(irData, lowThresh, midThresh, highThresh));
-
-      digitalWrite(25,HIGH);
-      // HeartRate(irData);
-      digitalWrite(25,LOW);
+      Serial.println(avgHeartRate);
 
       // get the average peak detector value
-      envelopeDetectAvg = envelopeDetectAvg/n1;
+      envelopeDetectAvg = envelopeDetectAvg/n;
 
       // Serial.print("Peak detect avg: ");
       // Serial.println(envelopeDetectAvg*voltageFactor);
       updatePwm(envelopeDetectAvg);
 
-      // find heartrate based on indices of irpeaks
-      heartrate = findHeartRate(irpeak);
-      // reset count and avg count
+      // reset counts and avg sums
       n1 = 0;
       envelopeDetectAvg = 0;
+
+      avgHeartRate = 0;
+      nHeartRates = 0;
     }
 
     // reset everything
     memset(redData, 0, sizeof(redData));
     memset(irData, 0, sizeof(irData));
-    memset(irpeak, 0,sizeof(irpeak));
+    // memset(irpeak, 0,sizeof(irpeak));
     n = 0;
   }
 
-  // // read red adc
-  // getADC(data,MISOPin0);
-  // redData[n] = ((data[0] << 8) + data[1]);
-  //
-  // // read ir adc
-  // getADC(data,MISOPin1);
-  // irData[n] = ((data[0] << 8) + data[1]);
+  // read red adc
+  getADC(data,MISOPin0);
+  redData[n] = ((data[0] << 8) + data[1]);
 
+  Serial.println("made it here1");
+
+  // read ir adc
+  getADC(data,MISOPin1);
+  irData[n] = ((data[0] << 8) + data[1]);
+  Serial.println("made it here2");
+
+  // read the envelope detector adc
+  int currEnvelopeDetect = analogRead(adc2);
+  Serial.println("made it here3");
+
+  // add envelope detect value to the running sum for avg
+  envelopeDetectAvg += currEnvelopeDetect;
+  Serial.println("made it here4");
+
+
+  matchPeakDetect(currEnvelopeDetect,irData[n]);
+
+  Serial.println("made it here5");
+
+  // if our IR value is a peak
+  if (matchPeakDetect(currEnvelopeDetect,irData[n])) {
+
+    // get the curr time
+    int currTime = millis();
+
+    // if this is not the first loop
+    if (n!=0) {
+
+      // get the millis difference from the last peak
+      int diffTime = currTime - prevTime;
+
+      // get the heartrate
+      int currHeartRate = (1000/diffTime) * 60;
+
+      // if it's greater than a threshold
+      if (currHeartRate >= minHeartRate){
+
+        Serial.print("heartRate: ");
+        Serial.println(currHeartRate);
+
+        // add it to the running sum
+        avgHeartRate += currHeartRate;
+        nHeartRates++;
+
+        // save this time
+        prevTime = currTime;
+      }
+    } else { // otherwise this is the first loop
+
+      // save this time
+      prevTime = currTime;
+    }
+  }
+  digitalWrite(25,LOW);
+
+
+  // // how to get n1 of irpeak to line up with envelope read
+  // Serial.print("IR peak: ");
+  // Serial.println(irpeak[n1]);
+
+  // increment n
+  n++;
 
   noInterrupts();
   countCopy = count;
@@ -249,15 +298,6 @@ void loop(void) {
     }
     break;
   }
-
-  // sample
-  // read red adc
-  getADC(data,MISOPin0);
-  redData[n] = ((data[0] << 8) + data[1]);
-  getADC(data,MISOPin1);
-  irData[n] = ((data[0] << 8) + data[1]);
-
-  n++;
 }
 
 /********************** getHeartRate() *********************/
@@ -321,23 +361,15 @@ int getHeartRate(int* data, int lowThreshold, int midThreshold, int highThreshol
   return heartRate;
 }
 
-/********************** findMinMax() *********************/
-// int findMinMax(int* data, int heartRate) {
-//   // look through data vector for a maximum heartrate
-//
-//   // look within (heartrate/sampling rate) indices to find minimum
-//
-// }
-
 
 /********************** max() *********************/
 int max(int *data) {
 
-  // set max val as first val in array
+  // set first val in array as current maximum
   int maxVal = data[0];
 
   // for every value in the array
-  for (int i = 0; i < sizeof(data); i++) {
+  for (int i = 1; i < sizeof(data); i++) {
     // if this value is more than previous max
     if (data[i] > maxVal) {
 
@@ -350,11 +382,15 @@ int max(int *data) {
 /********************** matchPeakDetect() *********************/
 int matchPeakDetect(int peak, int data) {
   int maxpk = 0;
+
   // want to check if data = peak from peak detector
-  if (data == peak)
-  maxpk = 1;
+  if (data == peak){
+    maxpk = 1;
+  }
+
   return maxpk;
 }
+
 /********************** findMinMax() *********************/
 int findMinMax(int* data, int heartRate) {
   // look through data vector for a maximum heartrate
@@ -391,17 +427,18 @@ float BloodSat(int RedMin, int RedMax, int IRMin, int IRMax) {
   return O2sat;
 }
 
-float findHeartRate(int* irpeaks) {
-  int peakdist;
-  // check that maxes are far enough apart but will need to add a moving variable to index
-  if (irpeak[2] - irpeak[1] > 10)
-  peakdist = irpeak[2] - irpeak[1];
-  float heartfreq = 1/(peakdist*fSample);
-  float heartrate = heartfreq*60;
-  Serial.print("Heartrate: ");
-  Serial.println(heartrate);
-  return heartrate;
-}
+// float findHeartRate(int* irpeaks) {
+//   int peakdist;
+//   // check that maxes are far enough apart but will need to add a moving variable to index
+//   if (irpeak[2] - irpeak[1] > 10)
+//   peakdist = irpeak[2] - irpeak[1];
+//   float heartfreq = 1/(peakdist*fSample);
+//   float heartrate = heartfreq*60;
+//   Serial.print("Heartrate: ");
+//   Serial.println(heartrate);
+//   return heartrate;
+// }
+
 /********************** max() *********************/
 //int max(int *data) {
 //
