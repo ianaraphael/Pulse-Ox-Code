@@ -135,6 +135,11 @@ void loop(void) {
     // read the envelope detector adc
     int envelopeDetect = analogRead(adc2);
 
+    irpeak[n1] = matchPeakDetect(envelopeDetect,irData[n1]); // check if ir data is at a peak by seeing if it matches peak detector value
+    // how to get n1 of irpeak to line up with envelope read
+    Serial.print("IR peak: ");
+    Serial.println(irpeak[n1]);
+    
     // add to the running sum for avg
     envelopeDetectAvg += envelopeDetect;
 
@@ -159,6 +164,8 @@ void loop(void) {
       Serial.println(envelopeDetectAvg*voltageFactor);
       updatePwm(envelopeDetectAvg);
 
+      // find heartrate based on indices of irpeaks 
+      heartrate = findHeartRate(irpeak);
       // reset count and avg count
       n1 = 0;
       envelopeDetectAvg = 0;
@@ -167,6 +174,7 @@ void loop(void) {
     // reset everything
     memset(redData, 0, sizeof(redData));
     memset(irData, 0, sizeof(irData));
+    memset(irpeak, 0,sizeof(irpeak));
     n = 0;
   }
 
@@ -244,12 +252,12 @@ void loop(void) {
   redData[n] = ((data[0] << 8) + data[1]);
   getADC(data,MISOPin1);
   irData[n] = ((data[0] << 8) + data[1]);
-  irpeak[n] = matchPeakDetect(envelopeDetect[n],irData[n]); // check if ir data is at a peak by seeing if it matches peak detector value
+  
   n++;
 }
 
 /********************** getHeartRate() *********************/
-int getHeartRate() {
+void getHeartRate() {
 
 }
 
@@ -266,47 +274,68 @@ int findMinMax(int* data, int heartRate) {
   // look through data vector for a maximum heartrate
   int heartfreq = heartRate/60;
   int numSamps = 1/heartfreq;
-  // look within (heartrate/sampling rate) indices to find minimum
-  int* const srcData = data.slice(1,numSamps);  // cut data down to each heart beat cycle or search around max peak found in heartrate extraction
-  int localMin = min(srcData);  // find min of this data section to find min of the first heart beat 
-  int localMax = max(srcData);
 
-  Serial.print("Local Min: ")
-  Serial.println(localMin)
-  return localMin
+// We start off with the first entry as the nearest.
+byte nearindex = 0;
+// abs returns the positive portion of a value, so -40 becomes 40.
+int localMin = 2.2/voltageFactor;
+
+// Now scan the rest of the array.
+for (byte i = 1; i < numSamps; i++) {
+  // Is the difference from the target value for this entry smaller than the currently recorded one?
+  if (abs(data[i]) < localMin) {
+    // Yes, so save the index number along with the current difference.
+    localMin = data[i];
+    nearindex = i;
+  }
+}
+Serial.print("The localMin is: ");
+Serial.println(data[nearindex]);
+  return localMin;
  }
 
-int BloodSat(int RedMin, int RedMax, int IRMin, int IRMax) {
+float BloodSat(int RedMin, int RedMax, int IRMin, int IRMax) {
 
   // take in min and max from each LED color and determine absorption ratio
-  R = (RedMax/RedMin)/(IRMax/IRMin);
-  k = 10; // calibration term that needs to be tuned empiracally 
-  O2sat = 110-k*R; 
+  float R = (RedMax/RedMin)/(IRMax/IRMin);
+  int k = 10; // calibration term that needs to be tuned empiracally 
+  float O2sat = 110-k*R; 
   Serial.print("Oxygen saturation: ");
   Serial.println(O2sat);
-  return O2sat
+  return O2sat;
 }
 
-
+float findHeartRate(int* irpeaks) {
+  int peakdist;
+  // check that maxes are far enough apart but will need to add a moving variable to index
+  if (irpeak[2] - irpeak[1] > 10) 
+    peakdist = irpeak[2] - irpeak[1];
+  float heartfreq = 1/(peakdist*fSample);
+  float heartrate = heartfreq*60;
+  Serial.print("Heartrate: ");
+  Serial.println(heartrate);
+  return heartrate;
+}
 /********************** max() *********************/
-int max(int *data) {
-
-  // set max val as first val in array
-  int maxVal = data[0];
-
-  // for every value in the array
-  for (int i = 0; i < sizeof(data); i++) {
-    // if this value is more than previous max
-    if (data[i] > maxVal) {
-
-      // update max value
-      maxVal = data[i];
-    }
-  }
-
-  // return max value
-  return maxVal;
-}
+//int max(int *data) {
+//
+//  // set max val as first val in array
+//  int maxVal = data[0];
+//
+//  // for every value in the array
+//  int size = sizeof(data) / sizeof(int)
+//  for (int i = 0; i < size; i++) {
+//    // if this value is more than previous max
+//    if (data[i] > maxVal) {
+//
+//      // update max value
+//      maxVal = data[i];
+//    }
+//  }
+//
+//  // return max value
+//  return maxVal;
+//}
 
 // float getAverage(int *data) {
 //   int sum=0;
