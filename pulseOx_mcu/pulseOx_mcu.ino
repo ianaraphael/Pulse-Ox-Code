@@ -80,7 +80,8 @@ SPISettings settings(fSample, MSBFIRST, SPI_MODE2);  // 1MHz, MSB,
 
 void setup(void)
 {
-  //
+
+  // set the adc for the peak detector
   analogReadResolution(12);
   pinMode(adc2,INPUT);
 
@@ -89,8 +90,6 @@ void setup(void)
   pinMode(RED, OUTPUT); // designate pin 14 an output pin
   Timer3.initialize(25);
   Timer3.attachInterrupt(ISR); // call ISR every 25 us
-
-  // pinMode(25,OUTPUT);
 
   // set up adc
   pinMode(CSPin, OUTPUT);
@@ -102,7 +101,7 @@ void setup(void)
   SPI.setMOSI(MOSIPin);
   SPI.setSCK(SCKPin);
 
-  // adjust state0Length and state2Length according to desired duty cycle
+  // set initial state lengths to maximum
   state0Length=16;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
   state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
   state2Length=16;               // state2 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state2Length <= 16)
@@ -112,30 +111,21 @@ void setup(void)
 void loop(void)
 {
 
+  // if we've taken enough data samples
   if (n>= BUFFLENGTH) {
 
-    digitalWrite(25,HIGH);
-
     // read the envelope detector adc
-    // int envelopeDetect = analogReadContinuous();
-
-    // read peak detector on IR ADC for now
-    // TODO: fix this
-    // getADC(data,MISOPin1);
     int envelopeDetect = analogRead(adc2);
-    // int envelopeDetect = ((data[0] << 8) + data[1]);
-    // Serial.print("peak detect adc read: ");
-    // Serial.println(envelopeDetect);
 
     // add to the running sum for avg
     envelopeDetectAvg += envelopeDetect;
     // increment n1
     n1++;
 
-    // if we've taken enough samples
+    // if we've taken enough peak detector samples
     if (n1>average_countThreshold) {
 
-      // get the average
+      // get the average peak detector value
       envelopeDetectAvg = envelopeDetectAvg/n1;
 
       Serial.print("Peak detect avg: ");
@@ -143,7 +133,7 @@ void loop(void)
       Serial.print("pwm length: ");
       Serial.println(state0Length);
 
-      // check against our thresholds
+      // if received voltage is too high
       if ((envelopeDetectAvg > redMaxThreshold) && (state0Length > 2)) {
 
         // DEBUG
@@ -151,24 +141,24 @@ void loop(void)
         Serial.println((float) envelopeDetect*voltageFactor);
 
 
-        // update our pwm
-        // adjust state0Length and state2Length according to desired duty cycle
+        // decrease pulse with
         state0Length=state0Length-1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
         state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
         state2Length=state0Length;     // match state 0 length
         state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-      } else if ((envelopeDetectAvg < redMinThreshold) && (state0Length <= 15)) {
+      }
+      // if received voltage is too low
+      else if ((envelopeDetectAvg < redMinThreshold) && (state0Length <= 15)) {
         Serial.println("going up :)");
 
-        // update our pwm
-        // adjust state0Length and state2Length according to desired duty cycle
+        // increase the pulse width
         state0Length=state0Length+1;               // state0 lasts 14*25 = 350 us. Do not exceed 400 us (i.e. keep state0Length <= 16)
         state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
         state2Length=state0Length;     // match state 0 length
         state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
       }
 
-      // reset count and avg
+      // reset count and avg count
       n1 = 0;
       envelopeDetectAvg = 0;
     }
@@ -177,15 +167,10 @@ void loop(void)
     memset(redData, 0, sizeof(redData));
     memset(irData, 0, sizeof(irData));
     n = 0;
-
-    // digitalWrite(25,LOW);
   }
 
 
   // read red adc
-
-
-
   // redData[n] = ((data[0] << 8) + data[1]);
   //
   // // read ir adc
