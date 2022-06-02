@@ -21,10 +21,10 @@
 #define baudRate 9600
 
 /****************** biomed constants ******************/
-#define KVALUE 2.5
+#define KVALUE 2.8
 #define maxHeartRate 150 // maximum acceptable heart rate, otherwise discarded as noise
 #define minHeartRatePeriod 400 // minimum acceptable heart rate period 1/(400/1000)*60 = 150 bpm
-#define minHeartRateSamples 5 // minimum samples for heartrate average
+#define minHeartRateSamples 10 // minimum samples for heartrate average
 #define redMaxThreshold 3720
 #define redMinThreshold 3350
 #define voltageFactor 0.0008058608059 // = 3.3/(2^12-1) for scaling binary voltage to decimal
@@ -182,7 +182,6 @@ void loop(void) {
 
       // add it to the running sum
       avgHeartRate += currHeartRate;
-      avgO2 += currO2;
 
       // increment n samples
       nHeartRateSamples++;
@@ -192,7 +191,9 @@ void loop(void) {
 
       // good time to find blood saturation while we're at it
       currO2 = BloodSat((double)currMin_red, (double)currMax_red, (double)currMin_ir,(double)currMax_ir);
+      Serial.print("currO2: ");
       Serial.println(currO2);
+      avgO2 += currO2;
     }
   }
 
@@ -247,7 +248,7 @@ int matchPeakDetect(int peak, int data) {
   int maxpk = 0;
 
   // want to check if data = reaches min
-  if ((double)data >= (double).99*peak){
+  if ((double)data >= (double)0.97*peak){
     maxpk = 1;
   }
 
@@ -261,6 +262,8 @@ double BloodSat(double RedMin, double RedMax, double IRMin, double IRMax) {
   double R = (RedMax/RedMin)/(IRMax/IRMin);
   int k = KVALUE; // calibration term that needs to be tuned empiracally
   double O2sat = 100-k*R;
+  // Serial.print("R: ");
+  // Serial.println(R);
   //  Serial.print("Oxygen saturation: ");
   //  Serial.println(O2sat);
   return O2sat;
