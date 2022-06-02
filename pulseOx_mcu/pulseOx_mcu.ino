@@ -20,11 +20,16 @@
 
 #define baudRate 9600
 
-// #define redThreshold 3850
-// #define redMaxThreshold 3723
+/****************** biomed constants ******************/
+#define KVALUE 2.5
+#define maxHeartRate 150 // maximum acceptable heart rate, otherwise discarded as noise
+#define minHeartRatePeriod 400 // minimum acceptable heart rate period 1/(400/1000)*60 = 150 bpm
+#define minHeartRateSamples 5 // minimum samples for heartrate average
 #define redMaxThreshold 3720
 #define redMinThreshold 3350
 #define voltageFactor 0.0008058608059 // = 3.3/(2^12-1) for scaling binary voltage to decimal
+
+#define pwmUpdateTime 1000 // time between PWM update calls in [ms]
 
 /****************** LED driver constants ******************/
 const int IR = 24;
@@ -45,20 +50,17 @@ int state3Length;
 byte data[2]; // holder array for instantaneous ADC reads
 
 /****************** init values ******************/
-#define pwmUpdateTime 3000 // time between PWM update calls in [ms]
-#define maxHeartRate 300 // maximum acceptable heart rate, otherwise discarded as noise
-#define minHeartRatePeriod 300 // minimum acceptable heart rate period 1/(250/1000)*60 = 240 bpm
-#define minHeartRateSamples 5 // minimum samples for heartrate average
-
 double prevTime = 0;
 double avgHeartRate = 0;
 int nHeartRateSamples = 0;
 int currMin_ir = 0;
-int currMax_ir = 0;
-int currMin_red = 0;
+int currMax_ir = 2000;
+int currMin_red = 2000;
 int currMax_red = 0;
 int pwmStartTime = 0;
 double currHeartRate = 0.0;
+double currO2 = 100;
+double avgO2 = 0;
 
 /****************** SPI settings ******************/
 // SPI pins
@@ -104,14 +106,6 @@ void setup(void) {
 }
 
 void loop(void) {
-
-  // // read red adc
-  // getADC(data,MISOPin0);
-  // redData = ((data[0] << 8) + data[1]);
-  // // read ir adc
-  // getADC(data,MISOPin1);
-  // irData[n] = ((data[0] << 8) + data[1]);
-
 
   /****************** read data ******************/
   // read red adc
@@ -164,10 +158,10 @@ void loop(void) {
   }
 
   /****************** check for peak ******************/
-  // check if there's a peak match
+  // check if there's a peak match - detect minimum
   int matchedPeak = matchPeakDetect(currEnvelopeDetect,currIR);
-  // Serial.print("matched peak?: ");
-  // Serial.println(matchedPeak);
+  //   Serial.print("matched peak?: ");
+  //   Serial.println(matchedPeak);
 
   // if our IR value is a peak
   if (matchedPeak == 1) {
@@ -178,22 +172,27 @@ void loop(void) {
     // get the elpased time since last peak in [ms]
     double diffTime = currTime - prevTime;
 
-    // if enough time has elapsed
+    // if enough time has elapsed to be a real heartbeat
     if (diffTime > minHeartRatePeriod) {
 
       // get heartrate in bpm
       currHeartRate = 1/(diffTime/1000)*60;
-      Serial.print("currHeartRate ");
-      Serial.println(currHeartRate);
+      //      Serial.print("currHeartRate ");
+      //      Serial.println(currHeartRate);
 
       // add it to the running sum
       avgHeartRate += currHeartRate;
+      avgO2 += currO2;
 
       // increment n samples
       nHeartRateSamples++;
 
       // update time
       prevTime = currTime;
+
+      // good time to find blood saturation while we're at it
+      currO2 = BloodSat((double)currMin_red, (double)currMax_red, (double)currMin_ir,(double)currMax_ir);
+      Serial.println(currO2);
     }
   }
 
@@ -202,15 +201,111 @@ void loop(void) {
 
     // calculate average heartRate
     avgHeartRate = avgHeartRate/nHeartRateSamples;
+    avgO2 = avgO2/nHeartRateSamples;
 
     Serial.print("heartrate: ");
     Serial.println(avgHeartRate);
+    Serial.print("O2 Saturation: ");
+    Serial.println(avgO2);
 
     // reset counts and avg sums
     nHeartRateSamples = 0;
     avgHeartRate = 0;
+    avgO2 = 0;
+    currO2 = 0;
+    currMin_ir = 2000;
+    currMin_red = 2000;
+    currMax_ir = 0;
+    currMax_red = 0;
   }
 
+
+}
+/****************** end loop() ******************/
+
+
+/********************** max() *********************/
+int max(int *data) {
+
+  // set first val in array as current maximum
+  int maxVal = data[0];
+
+  // for every value in the array
+  for (int i = 1; i < sizeof(data); i++) {
+    // if this value is more than previous max
+    if (data[i] > maxVal) {
+
+      // update max value
+      maxVal = data[i];
+    }
+  }
+  return maxVal;
+}
+
+/********************** matchPeakDetect() *********************/
+int matchPeakDetect(int peak, int data) {
+  int maxpk = 0;
+
+  // want to check if data = reaches min
+  if ((double)data >= (double).99*peak){
+    maxpk = 1;
+  }
+
+  return maxpk;
+}
+
+/****************** BloodSat() ******************/
+double BloodSat(double RedMin, double RedMax, double IRMin, double IRMax) {
+
+  // take in min and max from each LED color and determine absorption ratio
+  double R = (RedMax/RedMin)/(IRMax/IRMin);
+  int k = KVALUE; // calibration term that needs to be tuned empiracally
+  double O2sat = 100-k*R;
+  //  Serial.print("Oxygen saturation: ");
+  //  Serial.println(O2sat);
+  return O2sat;
+}
+
+/****************** updatePwm() ******************/
+int updatePwm(int peakVoltage) {
+
+  // if received voltage is too high
+  if ((peakVoltage > redMaxThreshold) && (state0Length > 2)) {
+
+    // decrease pulse with
+    state0Length=state0Length-1;   // decrement state0
+    state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+    state2Length=state0Length;     // match state 0 length
+    state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
+
+    Serial.print("Threshold exceeded: ");
+    Serial.println(peakVoltage*voltageFactor);
+    Serial.print("Decreasing pulse width to: ");
+    Serial.println(state0Length);
+
+  }
+  // if received voltage is too low
+  else if ((peakVoltage < redMinThreshold) && (state0Length <= 15)) {
+
+    // increase the pulse width
+    state0Length=state0Length+1;   // increment state0
+    state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
+    state2Length=state0Length;     // match state 0 length
+    state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
+    //
+    Serial.print("Threshold exceeded: ");
+    Serial.println(peakVoltage*voltageFactor);
+    Serial.print("Increasing pulse width to: ");
+    Serial.println(state0Length);
+
+  }
+  return state0Length;
+}
+
+
+/****************** ISR ******************/
+void ISR(void)
+{
   /****************** fsm ******************/
   noInterrupts();
   countCopy = count;
@@ -268,92 +363,6 @@ void loop(void) {
     }
     break;
   }
-}
-/****************** end loop() ******************/
-
-
-/********************** max() *********************/
-int max(int *data) {
-
-  // set first val in array as current maximum
-  int maxVal = data[0];
-
-  // for every value in the array
-  for (int i = 1; i < sizeof(data); i++) {
-    // if this value is more than previous max
-    if (data[i] > maxVal) {
-
-      // update max value
-      maxVal = data[i];
-    }
-  }
-  return maxVal;
-}
-
-/********************** matchPeakDetect() *********************/
-int matchPeakDetect(int peak, int data) {
-  int maxpk = 0;
-
-  // want to check if data = peak from peak detector
-  if ((double)data >= (double)0.99*peak){
-    maxpk = 1;
-  }
-
-  return maxpk;
-}
-
-/****************** BloodSat() ******************/
-float BloodSat(int RedMin, int RedMax, int IRMin, int IRMax) {
-
-  // take in min and max from each LED color and determine absorption ratio
-  float R = (RedMax/RedMin)/(IRMax/IRMin);
-  int k = 10; // calibration term that needs to be tuned empiracally
-  float O2sat = 110-k*R;
-  Serial.print("Oxygen saturation: ");
-  Serial.println(O2sat);
-  return O2sat;
-}
-
-/****************** updatePwm() ******************/
-int updatePwm(int peakVoltage) {
-
-  // if received voltage is too high
-  if ((peakVoltage > redMaxThreshold) && (state0Length > 2)) {
-
-    // decrease pulse with
-    state0Length=state0Length-1;   // decrement state0
-    state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
-    state2Length=state0Length;     // match state 0 length
-    state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-
-    Serial.print("Threshold exceeded: ");
-    Serial.println(peakVoltage*voltageFactor);
-    Serial.print("Decreasing pulse width to: ");
-    Serial.println(state0Length);
-
-  }
-  // if received voltage is too low
-  else if ((peakVoltage < redMinThreshold) && (state0Length <= 15)) {
-
-    // increase the pulse width
-    state0Length=state0Length+1;   // increment state0
-    state1Length=20-state0Length;  // state1 lasts (500 us minus the state0 duration)
-    state2Length=state0Length;     // match state 0 length
-    state3Length=20-state2Length;  // state3 lasts (500 us minus the state2 duration)
-
-    Serial.print("Threshold exceeded: ");
-    Serial.println(peakVoltage*voltageFactor);
-    Serial.print("Increasing pulse width to: ");
-    Serial.println(state0Length);
-
-  }
-  return state0Length;
-}
-
-
-/****************** ISR ******************/
-void ISR(void)
-{
   count = count + 1;
 }
 
